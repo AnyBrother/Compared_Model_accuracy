@@ -515,7 +515,7 @@ def main():
                                                model_list)
     base_train_predict_out = base_train_predict_define.single_predict_out_ykp()  # 第1-4项分别是:预测概率,预测标签,预测精度,训练的模型
     # 训练集训练的模型,在测试集上的预测结果
-    base_test_predict_define = BasePredictYkp(data_in_x_test, data_in_y_test, data_in_x_test, data_in_y_test,
+    base_test_predict_define = BasePredictYkp(data_in_x_train, data_in_y_train, data_in_x_test, data_in_y_test,
                                               model_list)
     base_test_predict_out = base_test_predict_define.single_predict_out_ykp()  # 第1-4项分别是:预测概率,预测标签,预测精度,训练的模型
     # 结果excel输出
