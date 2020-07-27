@@ -9,6 +9,9 @@
                 last column is 'labels 0/1'), which is located in the same file with this
                 python code, auto-calculate accuracy of desired models and output results
                 into 'excel'.
+            1.1 新增几个二分类的精度标准.(Added: Brier_score, Kappa, Inverse_precision, Jaccard,
+                                        Youden’s Index, Gini coefficient)
+                Added New Accuracy measurements for binary classification.
 """
 import os
 import pandas as pd
@@ -206,6 +209,77 @@ class AccuracyMeasureYkp:
         MK = TP / (TP + FP) + TN / (TN + FN) - 1
         return MK
 
+    def Brier_score_ykp(self):
+        """
+        Input:
+            y_real        —— 真实标签值
+            y_pre_label   —— 预测得到的标签值
+        Output:
+            Brier_score ——  Brier score (BS).是误差的概念, 布莱尔分数(BS)越小越好.
+        """
+        Brier_score = sum(np.power((self.y_real-self.y_pre_label), 2)/len(self.y_real))
+        return Brier_score
+
+    def Kappa_ykp(self):
+        """
+        Input:
+            TP,TN,FP,FN   —— 混淆矩阵结果
+        Output:
+            Kappa ——  Kappa值越大,预测效果越好.
+        """
+        TN, FP, FN, TP = self.confusion_matrix_ykp()
+        P_o = (TP + TN) / (TP + FP + FN + TN)
+        P_e = ((TP + FN) * (TP + FP) + (FN + TN) * (FP + TN)) / ((TP + FP + FN + TN) * (TP + FP + FN + TN))
+        Kappa = (P_o-P_e)/(1-P_e)
+        return Kappa
+
+    def Inverse_precision_ykp(self):
+        """
+        Input:
+            TP,TN,FP,FN   —— 混淆矩阵结果
+        Output:
+            Inverse_precision ——  Inverse_precision(预测为非违约,且真实也是非违约,的正确率)
+            Measures proportion of correctly classified negative cases out of total negative predictions.
+        """
+        TN, FP, FN, TP = self.confusion_matrix_ykp()
+        Inverse_precision = TN/(TN+FN)
+        return Inverse_precision
+
+    def Jaccard_ykp(self):
+        """
+        Input:
+            TP,TN,FP,FN   —— 混淆矩阵结果
+        Output:
+            Jaccard  ——  Jaccard coefficient (Measures similarity between actual and predicted values)
+        """
+        TN, FP, FN, TP = self.confusion_matrix_ykp()
+        Jaccard = TP / (TP+FP+FN)
+        return Jaccard
+
+    def Youden_ykp(self):
+        """
+        Input:
+            TP,TN,FP,FN   —— 混淆矩阵结果
+        Output:
+            Youden  ——  Youden’s Index(Measures discriminating power of the test i.e. ability of classifier to avoid misclassification)
+        """
+        TN, FP, FN, TP = self.confusion_matrix_ykp()
+        Youden = TP/(TP+FN)+TN/(TN+FP)-1
+        return Youden
+
+    def gini_ykp(self):
+        """
+        Input:
+            y_real        —— 真实标签值
+            y_pre_prob    —— 预测得到的概率值
+        Output:
+            gini ——  defined as twice the area between the ROC curve and the chance diagona.
+        """
+        FPR, TPR, thresholds = roc_curve(self.y_real, self.y_pre_prob)
+        AUC = auc(FPR, TPR)
+        gini = 2*AUC - 1
+        return gini
+
     def accuracy_dict_ykp(self):
         """
         Input:
@@ -230,6 +304,12 @@ class AccuracyMeasureYkp:
                 MK            —— Markedness
                 Type_II_error —— = 1-Recall,是第二类错误(将违约样本错判为非违约的比例)
                 Type_I_error  —— = 1-Specificity,是第一类错误(将非违约样本错判为违约的比例)
+                Brier_score   —— 布莱尔分数Brier score (BS).
+                Kappa         ——  Kappa值越大,预测效果越好.
+                Inverse_precision ——  Inverse_precision(预测为非违约,且真实也是非违约,的正确率)
+                Jaccard  ——  Jaccard coefficient (Measures similarity between actual and predicted values)
+                Youden  ——  Youden’s Index(Measures discriminating power of the test i.e. ability of classifier to avoid misclassification)
+                gini ——  基尼系数.defined as twice the area between the ROC curve and the chance diagona.
         """
         Accuracy_dict = dict()
         Accuracy_dict['TN'] = self.confusion_matrix_ykp()[0]
@@ -249,6 +329,12 @@ class AccuracyMeasureYkp:
         Accuracy_dict['MK'] = self.mk_ykp()
         Accuracy_dict['Type_II_error'] = self.f_measure_ykp()[3]
         Accuracy_dict['Type_I_error'] = self.g_means_ykp()[3]
+        Accuracy_dict['Brier_score'] = self.Brier_score_ykp()
+        Accuracy_dict['Kappa'] = self.Kappa_ykp()
+        Accuracy_dict['Inverse_precision'] = self.Inverse_precision_ykp()
+        Accuracy_dict['Jaccard'] = self.Jaccard_ykp()
+        Accuracy_dict['Youden'] = self.Youden_ykp()
+        Accuracy_dict['gini'] = self.gini_ykp()
         return Accuracy_dict
 
 
