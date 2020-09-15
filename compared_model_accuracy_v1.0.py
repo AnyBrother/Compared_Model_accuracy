@@ -12,10 +12,12 @@
             1.1 新增几个二分类的精度标准.(Added: Brier_score, Kappa, Inverse_precision, Jaccard,
                                         Youden’s Index, Gini coefficient)
                 Added New Accuracy measurements for binary classification.
+            1.2 新增1个二分类的精度标准.(Added: H_measure)
 """
 import os
 import pandas as pd
 import numpy as np
+from sympy import *
 
 
 from sklearn.metrics import roc_curve, auc, confusion_matrix  # 导入 获取精度判别的计算包
@@ -280,6 +282,37 @@ class AccuracyMeasureYkp:
         gini = 2*AUC - 1
         return gini
 
+    @staticmethod
+    def beta_distribution(x, a, b):
+        # beta distribution value
+        t = symbols('t')
+        B_a_b = integrate(t ** (a - 1) * (1 - t) ** (b - 1), (t, 0, 1))
+        beta_x = 1 / (B_a_b) * x ** (a - 1) * (1 - x) ** (b - 1)
+        return beta_x
+
+    def h_measure_ykp(self):
+        """
+        Input:
+            y_real        —— 真实标签值
+            y_pre_prob    —— 预测得到的概率值
+        Output:
+            h_measure ——  defined as an effective metric that provides coherent misclassification cost to evaluate the competence of models.
+        """
+        # beta分布的参数设置,默认是beta(2,2)
+        a = 2
+        b = 2
+        # 开始计算h_measure
+        TN, FP, FN, TP = self.confusion_matrix_ykp()
+        pai_1 = (TP+FN)/(TP+FN+TN+FP)   # 真实违约客户占所有客户的比重
+        pai_0 = (TN+FP)/(TP+FN+TN+FP)   # 真实非违约客户占所有客户的比重
+        x = symbols('x')
+        # beta_integrate_value = integrate(self.beta_distribution(x, a, b), (x, range_min, range_max))
+        L_max = pai_0*integrate(x*self.beta_distribution(x, a, b), (x, 0, pai_1))+pai_1*integrate((1-x)*self.beta_distribution(x, a, b), (x, pai_1, 1))
+        L = pai_0 * integrate(x * FP/(TP+FN+TN+FP), (x, 0, pai_1)) + pai_1 * integrate((1 - x) * FN/(TP+FN+TN+FP), (x, pai_1, 1))
+        # L = integrate((x*FP/(TP+FN+TN+FP)+(1-x)*FN/(TP+FN+TN+FP))*self.beta_distribution(x, a, b), (x, 0, 1))
+        h_measure = 1-L/L_max
+        return h_measure
+
     def accuracy_dict_ykp(self):
         """
         Input:
@@ -310,6 +343,7 @@ class AccuracyMeasureYkp:
                 Jaccard  ——  Jaccard coefficient (Measures similarity between actual and predicted values)
                 Youden  ——  Youden’s Index(Measures discriminating power of the test i.e. ability of classifier to avoid misclassification)
                 gini ——  基尼系数.defined as twice the area between the ROC curve and the chance diagona.
+                H_measure——H值.an effective metric that provides coherent misclassification cost to evaluate the competence of models.
         """
         Accuracy_dict = dict()
         Accuracy_dict['TN'] = self.confusion_matrix_ykp()[0]
@@ -335,6 +369,7 @@ class AccuracyMeasureYkp:
         Accuracy_dict['Jaccard'] = self.Jaccard_ykp()
         Accuracy_dict['Youden'] = self.Youden_ykp()
         Accuracy_dict['gini'] = self.gini_ykp()
+        Accuracy_dict['H_measure'] = self.h_measure_ykp()
         return Accuracy_dict
 
 
