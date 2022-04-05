@@ -36,6 +36,7 @@ import datetime
 import pickle
 
 
+
 class AccuracyMeasureYkp:
     # 计算精度结果
     """
@@ -53,6 +54,7 @@ class AccuracyMeasureYkp:
             y_real       —— 真实标签值
             y_pre_prob   —— 预测标签概率值
             y_pre_label  —— 预测得到的标签值
+            weight       —— 两类0:1的非平衡比例
         """
         self.y_real = y_real
         self.y_pre_prob = y_pre_prob
@@ -136,7 +138,7 @@ class AccuracyMeasureYkp:
         """
         N = len(self.y_real)
         Logistic_Loss = -(1 / N) * sum(
-            self.y_real * np.log(self.y_pre_prob) + (1 - self.y_real) * np.log(1 - self.y_pre_prob))
+            self.y_real * np.log(self.y_pre_prob+1e-20) + (1 - self.y_real) * np.log(1 - self.y_pre_prob+1e-20))
         return Logistic_Loss
 
     def auc_ykp(self):
@@ -263,7 +265,8 @@ class AccuracyMeasureYkp:
         Input:
             TP,TN,FP,FN   —— 混淆矩阵结果
         Output:
-            Youden  ——  Youden’s Index(Measures discriminating power of the test i.e. ability of classifier to avoid misclassification)
+            Youden  ——  Youden’s Index(Measures discriminating power of the test
+                        i.e. ability of classifier to avoid misclassification)
         """
         TN, FP, FN, TP = self.confusion_matrix_ykp()
         Youden = TP/(TP+FN)+TN/(TN+FP)-1
@@ -286,8 +289,8 @@ class AccuracyMeasureYkp:
     def beta_distribution(x, a, b):
         # beta distribution value
         t = symbols('t')
-        B_a_b = integrate(t ** (a - 1) * (1 - t) ** (b - 1), (t, 0, 1))
-        beta_x = 1 / (B_a_b) * x ** (a - 1) * (1 - x) ** (b - 1)
+        beta_a_b = integrate(t ** (a - 1) * (1 - t) ** (b - 1), (t, 0, 1))
+        beta_x = 1 / beta_a_b * x ** (a - 1) * (1 - x) ** (b - 1)
         return beta_x
 
     def h_measure_ykp(self):
@@ -296,7 +299,8 @@ class AccuracyMeasureYkp:
             y_real        —— 真实标签值
             y_pre_prob    —— 预测得到的概率值
         Output:
-            h_measure ——  defined as an effective metric that provides coherent misclassification cost to evaluate the competence of models.
+            h_measure ——  defined as an effective metric that provides
+                            coherent misclassification cost to evaluate the competence of models.
         """
         # beta分布的参数设置,默认是beta(2,2)
         a = 2
@@ -312,6 +316,50 @@ class AccuracyMeasureYkp:
         # L = integrate((x*FP/(TP+FN+TN+FP)+(1-x)*FN/(TP+FN+TN+FP))*self.beta_distribution(x, a, b), (x, 0, 1))
         h_measure = 1-L/L_max
         return h_measure
+
+    def Weighted_cross_entropy(self):
+        """
+        :param y_pre_probs:  net's output, which has reshaped [batch size,num_class]
+        :param label:   Ground Truth which is ont hot encoing and has typr format of [batch size, num_class]
+        :param weight:  a vector that describes every catagory's coefficent whose shape is (num_class,)
+        :return: a scalar
+        """
+        weight = [1, len(self.y_real)/self.y_real.sum()-1]
+        label = np.c_[1-np.array(self.y_real), np.array(self.y_real)]
+        y_pre_probs = np.c_[1-np.array(self.y_pre_prob+1e-20), np.array(self.y_pre_prob+1e-20)]
+        loss = np.dot(np.log2(y_pre_probs) * label, np.expand_dims(weight, axis=1)) + \
+               np.log2(y_pre_probs) * (1 - label)
+        return -loss.sum()
+
+    def focal_loss(self, a=0.5, r=0.9):
+        """
+        :param y_pre_probs: [batch size,num_classes] score value
+        :param label: [batch size,num_classes] gt value
+        :param a: generally be 0.5. 样本平衡因子，在0-1之间
+        :param r: generally be 0.9. 作用是相对放大难分类样本的梯度，相对降低易分类样本的梯度，为0时则是标准的交叉熵
+        :return: scalar loss value of a batch
+        """
+        label = np.c_[1 - np.array(self.y_real), np.array(self.y_real)]
+        y_pre_probs = np.c_[1 - np.array(self.y_pre_prob + 1e-20), np.array(self.y_pre_prob + 1e-20)]
+        p_1 = - a * np.power(1 - y_pre_probs, r) * np.log2(y_pre_probs) * label
+        p_0 = - (1 - a) * np.power(y_pre_probs, r) * np.log2(1 - y_pre_probs) * (1 - label)
+        return (p_1 + p_0).sum()
+
+    def dice_loss(self):
+        """
+        dice_loss 来自文章V-Net: Fully Convolutional Neural Networks for Volumetric Medical Image Segmentation，
+                    旨在应对语义分割中正负样本强烈不平衡的场景.
+        dice_coefficient = 2*TP/(FP+FN+2*TP)
+        dice_coefficient 是可以体现出预测区域和真实区域的重叠程度，它的取值范围是[0, 1]，
+                        当dice coefficient为1时，说明预测区域和真实区域完全重叠，是理想状态；
+                        当dice coefficient为0时，说明预测结果一点作用没有。
+        dice_loss = 1 - dice_coefficient = 1 - 2*TP/(FP+FN+2*TP). 为避免分子分母0的出现, 一般分子分母都加一个极小数.
+                    由于是离散值, 因此需要用到预测的概率值, 使得损失函数连续.
+                    此处, 只用于目标效果验证, 因此, 取离散形式.
+        """
+        TN, FP, FN, TP = self.confusion_matrix_ykp()
+        dice_loss = 1 - 2 * TP / (FP + FN + 2 * TP)
+        return dice_loss
 
     def accuracy_dict_ykp(self):
         """
@@ -344,6 +392,9 @@ class AccuracyMeasureYkp:
                 Youden  ——  Youden’s Index(Measures discriminating power of the test i.e. ability of classifier to avoid misclassification)
                 gini ——  基尼系数.defined as twice the area between the ROC curve and the chance diagona.
                 H_measure——H值.an effective metric that provides coherent misclassification cost to evaluate the competence of models.
+                Weighted_cross_entropy_loss——加权交叉熵损失. 常用于深度学习中的损失函数.
+                Focal_loss——何凯明大神的RetinaNet中提出了Focal Loss来解决类别不平衡的问题. 常用于深度学习中的非平衡损失函数. 更关注与难分类的样本
+                Dice_loss——用于处理CNN中的非平衡样本. https://arxiv.org/abs/1606.04797
         """
         Accuracy_dict = dict()
         Accuracy_dict['TN'] = self.confusion_matrix_ykp()[0]
@@ -370,6 +421,9 @@ class AccuracyMeasureYkp:
         Accuracy_dict['Youden'] = self.Youden_ykp()
         Accuracy_dict['gini'] = self.gini_ykp()
         Accuracy_dict['H_measure'] = self.h_measure_ykp()
+        Accuracy_dict['Weighted_cross_entropy_loss'] = self.Weighted_cross_entropy()
+        Accuracy_dict['Focal_loss'] = self.focal_loss(a=0.5, r=0.9)
+        Accuracy_dict['Dice_loss'] = self.dice_loss()
         return Accuracy_dict
 
 
