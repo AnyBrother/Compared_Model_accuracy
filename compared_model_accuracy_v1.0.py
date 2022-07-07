@@ -13,6 +13,7 @@
                                         Youden’s Index, Gini coefficient)
                 Added New Accuracy measurements for binary classification.
             1.2 新增1个二分类的精度标准.(Added: H_measure)
+            1.3 新增32个三分类的精度标准.(Added: F1, F1_micro, F1_macro, F1_weighted, etc.)
 """
 import os
 import pandas as pd
@@ -20,7 +21,9 @@ import numpy as np
 from sympy import *
 
 
-from sklearn.metrics import roc_curve, auc, confusion_matrix  # 导入 获取精度判别的计算包
+from sklearn.metrics import roc_curve, auc, confusion_matrix  # 导入 获取两分类 精度判别的计算包
+from sklearn.metrics import confusion_matrix, multilabel_confusion_matrix, accuracy_score, \
+    f1_score, precision_score, recall_score, roc_auc_score, jaccard_score  # 导入 获取多分类 精度判别的计算包
 from sklearn import svm  # 导入 SVM 模型
 from sklearn.linear_model import LogisticRegression  # 导入 逻辑回归 模型
 from sklearn.naive_bayes import GaussianNB  # 导入 高斯-贝叶斯 模型
@@ -34,7 +37,6 @@ from sklearn.ensemble import AdaBoostClassifier  # 导入 AdaBoost集成 模型
 import time
 import datetime
 import pickle
-
 
 
 class AccuracyMeasureYkp:
@@ -427,6 +429,249 @@ class AccuracyMeasureYkp:
         return Accuracy_dict
 
 
+class AccuracyMeasureMultiYkp:
+    # 计算多分类的精度结果
+    """
+        ['Accuracy', 'F1_macro', 'F1_micro', 'F1_weighted',
+        'Sensitivity_macro', 'Sensitivity_micro', 'Sensitivity_weighted',
+        'Specificity_macro', 'Specificity_micro', 'Specificity_weighted',
+        'G_Means_macro', 'G_Means_micro', 'G_Means_weighted',
+        'Type_I_error_macro', 'Type_I_error_micro', 'Type_I_error_weighted',
+        'Type_II_error_macro', 'Type_II_error_micro', 'Type_II_error_weighted',
+        'Precision_macro', 'Precision_micro', 'Precision_weighted',
+        'Recall_macro', 'Recall_micro', 'Recall_weighted',
+        'AUC_ovr_macro', 'AUC_ovr_weighted', 'AUC_ovo_macro', 'AUC_ovo_weighted',
+        'Jaccard_macro', 'Jaccard_micro', 'Jaccard_weighted']
+    """
+    def __init__(self, y_real, y_pre_label, y_pre_prob, y_pre_prob_threshold=0.5):
+        """
+        Input:
+            y_real       —— 真实标签值
+            y_pre_prob   —— 预测标签概率值
+            y_pre_label  —— 预测得到的标签值
+        """
+        self.y_real = y_real
+        self.y_pre_label = y_pre_label
+        self.y_pre_prob = y_pre_prob
+        self.y_pre_prob_threshold = y_pre_prob_threshold
+
+    def confusion_matrix_ykp(self):
+        """
+        Input:
+            y_real       —— 真实标签值
+            y_pre_label  —— 预测得到的标签值
+        Output:
+            TP,TN,FP,FN  —— 混淆矩阵结果
+        Confusion Matrix:
+        =============================================================
+                     预测
+                  |  1                            0                             合计
+          实 |  1 |  True  Positive(TP)           False Negative(FN)            Actual Positive=(TP+FN)
+          际 |  0 |  False Positive(FP)           True  Negative(TN)            Actual Negative=(FP+TN)
+          合   计 |  Predicted Positive(TP+FP)    Predicted Negative(FN+TN)     TP+FP+FN+TN
+        =============================================================
+        """
+        cf_matrix = confusion_matrix(self.y_real, self.y_pre_label)
+        mlcf_matrix = multilabel_confusion_matrix(self.y_real, self.y_pre_label)
+        return cf_matrix, mlcf_matrix
+
+    def accuracy_ykp(self):
+        """
+        Input:
+            TP,TN,FP,FN  —— 混淆矩阵结果
+        Output:
+            Accuracy     ——  One of the prevailing evaluation measure
+                        and defined as the correct prediction sample size
+                        divided by the total testing sample size.
+        """
+        Accuracy = accuracy_score(self.y_real, self.y_pre_label)
+        return Accuracy
+
+    def f_measure_ykp(self):
+        """
+        Input:
+            y_real       —— 真实标签值
+            y_pre_label  —— 预测得到的标签值
+        Output:
+            F1_Macro     —— 称为F1分数或F分数,是权衡Precision和Recall是使用精度和召回率的方法组合到一个度量上
+        Reference:
+            Zhou. 2017. http://dx.doi.org/10.1016/j.knosys.2017.05.003
+        """
+        F1_macro = f1_score(self.y_real, self.y_pre_label, average='macro')  # 取所有类的平均值
+        F1_micro = f1_score(self.y_real, self.y_pre_label, average='micro')  # 再取所有类的micro值
+        F1_weighted = f1_score(self.y_real, self.y_pre_label, average='weighted')  # 取所有类的样本比例的weighted值
+        return F1_macro, F1_micro, F1_weighted
+
+    def g_means_ykp(self):
+        """
+        Input:
+            TP,TN,FP,FN   —— 混淆矩阵结果
+        Output:
+            Sensitivity   ——  真实的1中判对的比例=True Positive Rate (TPR) or Recall
+            Specificity   —— 真实的0中判对的比例
+            G_Means     —— The higher G-Mean shows the balance between classes is reasonable
+                        and has good performance in the binary classification model.
+            Type_I_error —— 第一类错误(将非违约样本错判为违约的比例)
+        """
+        mlcf_matrix = self.confusion_matrix_ykp()[1]
+        # 切片操作，获取每一个类别各自的 tn, fp, tp, fn
+        tn_sum = mlcf_matrix[:, 0, 0]  # True Negative
+        fp_sum = mlcf_matrix[:, 0, 1]  # False Positive
+        tp_sum = mlcf_matrix[:, 1, 1]  # True Positive
+        fn_sum = mlcf_matrix[:, 1, 0]  # False Negative
+        # 计算Sensitivity
+        Condition_negative_se = tp_sum + fn_sum
+        Condition_negative_se = np.array([1e-6 if x == 0 else x for x in Condition_negative_se])  # 这里加1e-6，防止 0/0的情况
+        Sensitivity = tp_sum / Condition_negative_se  # Sensitivity = TP / (TP + FN)
+        Sensitivity_macro = np.average(Sensitivity, weights=None)
+        Sensitivity_micro = np.sum(tp_sum) / np.sum(tp_sum + fn_sum)
+        Sensitivity_weighted = np.average(Sensitivity, weights=Condition_negative_se)
+        # 计算Specificity
+        Condition_negative_sp = tn_sum + fp_sum
+        Condition_negative_sp = np.array([1e-6 if x == 0 else x for x in Condition_negative_sp])  # 这里加1e-6，防止 0/0的情况
+        Specificity = tn_sum / Condition_negative_sp  # Specificity = TN / (TN + FP)
+        Specificity_macro = np.average(Specificity, weights=None)
+        Specificity_micro = np.sum(tn_sum) / np.sum(tn_sum + fp_sum)
+        Specificity_weighted = np.average(Specificity, weights=Condition_negative_sp)
+        # 计算G-Mean
+        G_Means = np.sqrt(Sensitivity * Specificity)  # G_Means = np.sqrt(Sensitivity * Specificity)
+        G_Means_macro = np.average(G_Means, weights=None)
+        G_Means_micro = np.sum(G_Means) / np.sum(G_Means)
+        G_Means_weighted = np.average(G_Means, weights=Condition_negative_sp+Condition_negative_se)
+        # 计算Type_I_error
+        Type_I_error = 1 - Specificity  # 第一类错误(将好样本错判为差样本的比例)
+        Type_I_error_macro = np.average(Type_I_error, weights=None)
+        Type_I_error_micro = np.sum(Type_I_error) / np.sum(Type_I_error)
+        Type_I_error_weighted = np.average(Type_I_error, weights=Condition_negative_sp)
+        return Sensitivity_macro, Sensitivity_micro, Sensitivity_weighted, \
+               Specificity_macro, Specificity_micro, Specificity_weighted, \
+               G_Means_macro, G_Means_micro, G_Means_weighted, \
+               Type_I_error_macro, Type_I_error_micro, Type_I_error_weighted
+
+    def precision_ykp(self):
+        """
+        Input:
+            y_real        —— 真实标签值
+            y_pre_prob    —— 预测得到的概率值
+        Output:
+            precision     ——  预测的1中判对的比例
+        """
+        Precision_macro = precision_score(self.y_real, self.y_pre_label, average='macro')  # precision = TP / (TP + FP)
+        Precision_micro = precision_score(self.y_real, self.y_pre_label, average='micro')  # precision = TP / (TP + FP)
+        Precision_weighted = precision_score(self.y_real, self.y_pre_label, average='weighted')  # precision = TP / (TP + FP)
+        return Precision_macro, Precision_micro, Precision_weighted
+
+    def recall_ykp(self):
+        """
+        Input:
+            y_real        —— 真实标签值
+            y_pre_prob    —— 预测得到的概率值
+        Output:
+            recall_score     ——  真实的1中判对的比例
+            Type_II_error    —— 第二类错误(将差样本错判为好样本的比例)
+        """
+        Recall_macro = recall_score(self.y_real, self.y_pre_label, average='macro')  # Recall = TP / (TP + FN)
+        Recall_micro = recall_score(self.y_real, self.y_pre_label, average='micro')  # Recall = TP / (TP + FN)
+        Recall_weighted = recall_score(self.y_real, self.y_pre_label, average='weighted')  # Recall = TP / (TP + FN)
+        # Type_II_error = 1 - Recall  # 第二类错误(将差样本错判为好样本的比例)
+        Type_II_error_macro = 1 - Recall_macro
+        Type_II_error_micro = 1 - Recall_micro
+        Type_II_error_weighted = 1 - Recall_weighted
+        return Recall_macro, Recall_micro, Recall_weighted, \
+               Type_II_error_macro, Type_II_error_micro, Type_II_error_weighted
+
+    def auc_ykp(self):
+        """
+        Input:
+            y_real        —— 真实标签值
+            y_pre_prob    —— 预测得到的概率值. 多分类必须是每个标签对应的概率
+        Output:
+            AUC ——  an extensively used evaluation measure obtained from
+                    the Receiver Operating Characteristic (ROC) curve.
+                    representing the area under the ROC curve. ROC curve:
+                    The x-axis represents the false-positive rate (computed as 1-specificity)
+                    the y-axis represents true-positive rate sensitivity)
+        """
+        # ovr对类别不平衡比较敏感
+        AUC_ovr_macro = roc_auc_score(np.array(self.y_real), self.y_pre_prob, average='macro', multi_class='ovr')
+        AUC_ovr_weighted = roc_auc_score(np.array(self.y_real), self.y_pre_prob, average='weighted', multi_class='ovr')
+        # ovo对类别不平衡不敏感
+        AUC_ovo_macro = roc_auc_score(np.array(self.y_real), self.y_pre_prob, average='macro', multi_class='ovo')
+        AUC_ovo_weighted = roc_auc_score(np.array(self.y_real), self.y_pre_prob, average='weighted', multi_class='ovo')
+        return AUC_ovr_macro, AUC_ovr_weighted, AUC_ovo_macro, AUC_ovo_weighted
+
+    def jaccard_ykp(self):
+        """
+        Input:
+            TP,TN,FP,FN   —— 混淆矩阵结果
+        Output:
+            MCC ——  马Jaccard 相似系数得分.
+                定义为交集的大小除以两个标签集的并集大小，用于将样本的预测标签集与对应的标签集进行比较y_true 。
+        """
+        Jaccard_macro = jaccard_score(self.y_real, self.y_pre_label, average='macro')
+        Jaccard_micro = jaccard_score(self.y_real, self.y_pre_label, average='micro')
+        Jaccard_weighted = jaccard_score(self.y_real, self.y_pre_label, average='weighted')
+        return Jaccard_macro, Jaccard_micro, Jaccard_weighted
+
+    def accuracy_dict_ykp(self):
+        """
+        Input:
+            y_real       —— 真实标签值
+            y_pre_prob   —— 预测标签概率值
+            y_pre_label —— 预测得到的标签值
+        Output:
+            Accuracy_Output:
+                cf_matrix, mlcf_matrix   —— 混淆矩阵结果
+                Accuracy      —— 准确率 (Accuracy)
+                F_measure     —— F指数 (F1_macro, F1_micro, F1_weighted)
+                Sensitivity   —— 敏感度 (Sensitivity_macro, Sensitivity_micro, Sensitivity_weighted)
+                Specificity   —— 特异度 (Specificity_macro, Specificity_micro, Specificity_weighted)
+                G_Mean        —— G-means几何平均值 (G_Means_macro, G_Means_micro, G_Means_weighted)
+                Type_I_error  —— = 1-Specificity,是第一类错误(将非违约样本错判为违约的比例)
+                                    (Type_I_error_macro, Type_I_error_micro, Type_I_error_weighted)
+                Type_II_error —— = 1-Recall,是第二类错误(将违约样本错判为非违约的比例)
+                                    (Type_II_error_macro, Type_II_error_micro, Type_II_error_weighted)
+                Precision     —— 准确率 (Precision_macro, Precision_micro, Precision_weighted)
+                Recall        —— 召回率 (Recall_macro, Recall_micro, Recall_weighted)
+                AUC           —— ROC曲线下的面积 (AUC_ovr_macro, AUC_ovr_weighted, AUC_ovo_macro, AUC_ovo_weighted)
+                Jaccard       —— Jaccard相似系数 (Jaccard_macro, Jaccard_micro, Jaccard_weighted)
+        """
+        Accuracy_dict = dict()
+        Accuracy_dict['Accuracy'] = self.accuracy_ykp()
+        Accuracy_dict['F1_macro'] = self.f_measure_ykp()[0]
+        Accuracy_dict['F1_micro'] = self.f_measure_ykp()[1]
+        Accuracy_dict['F1_weighted'] = self.f_measure_ykp()[2]
+        Accuracy_dict['Sensitivity_macro'] = self.g_means_ykp()[0]
+        Accuracy_dict['Sensitivity_micro'] = self.g_means_ykp()[1]
+        Accuracy_dict['Sensitivity_weighted'] = self.g_means_ykp()[2]
+        Accuracy_dict['Specificity_macro'] = self.g_means_ykp()[3]
+        Accuracy_dict['Specificity_micro'] = self.g_means_ykp()[4]
+        Accuracy_dict['Specificity_weighted'] = self.g_means_ykp()[5]
+        Accuracy_dict['G_Means_macro'] = self.g_means_ykp()[6]
+        Accuracy_dict['G_Means_micro'] = self.g_means_ykp()[7]
+        Accuracy_dict['G_Means_weighted'] = self.g_means_ykp()[8]
+        Accuracy_dict['Type_I_error_macro'] = self.g_means_ykp()[9]
+        Accuracy_dict['Type_I_error_micro'] = self.g_means_ykp()[10]
+        Accuracy_dict['Type_I_error_weighted'] = self.g_means_ykp()[11]
+        Accuracy_dict['Type_II_error_macro'] = self.recall_ykp()[3]
+        Accuracy_dict['Type_II_error_micro'] = self.recall_ykp()[4]
+        Accuracy_dict['Type_II_error_weighted'] = self.recall_ykp()[5]
+        Accuracy_dict['Precision_macro'] = self.precision_ykp()[0]
+        Accuracy_dict['Precision_micro'] = self.precision_ykp()[1]
+        Accuracy_dict['Precision_weighted'] = self.precision_ykp()[2]
+        Accuracy_dict['Recall_macro'] = self.recall_ykp()[0]
+        Accuracy_dict['Recall_micro'] = self.recall_ykp()[1]
+        Accuracy_dict['Recall_weighted'] = self.recall_ykp()[2]
+        Accuracy_dict['AUC_ovr_macro'] = self.auc_ykp()[0]
+        Accuracy_dict['AUC_ovr_weighted'] = self.auc_ykp()[1]
+        Accuracy_dict['AUC_ovo_macro'] = self.auc_ykp()[2]
+        Accuracy_dict['AUC_ovo_weighted'] = self.auc_ykp()[3]
+        Accuracy_dict['Jaccard_macro'] = self.jaccard_ykp()[0]
+        Accuracy_dict['Jaccard_micro'] = self.jaccard_ykp()[1]
+        Accuracy_dict['Jaccard_weighted'] = self.jaccard_ykp()[2]
+        return Accuracy_dict
+
+
 # 模型训练及预测
 class BasePredictYkp:
     def __init__(self, X_train, Y_train, X_test, Y_test, model_list):
@@ -704,6 +949,16 @@ def main():
     base_test_predict_out[1].to_excel(writer, sheet_name="05.预测的标签值(测试集)", index=True)
     base_test_predict_out[2].to_excel(writer, sheet_name="06.预测的精度值(测试集)", index=True)
     writer.save()
+    # ==== 计算多标签精度的测试 ====
+    y_true = [0, 1, 1, 1, 0, 2, 2]
+    y_pre_label = [0, 1, 2, 2, 0, 2, 1]
+    y_pre_prob = [[0.5, 0.2, 0.3], [0.2, 0.5, 0.3], [0.2, 0.3, 0.5], [0.2, 0.2, 0.6],
+                  [0.7, 0.2, 0.1], [0.1, 0.3, 0.6], [0.2, 0.5, 0.3]]
+    AccSet = AccuracyMeasureMultiYkp(y_true, y_pre_label, y_pre_prob)
+    AccDict = AccSet.accuracy_dict_ykp()
+    # 将dict转换为DataFrame
+    AccDf = pd.DataFrame(AccDict, index=[0])
+    print(" 多标签精度结果 \n", AccDf.T)
     return base_train_predict_out, base_test_predict_out, \
            excel_file_name_train, excel_sheet_name_train, \
            excel_file_name_test, excel_sheet_name_test, \
